@@ -11,6 +11,11 @@ GO
 USE IRCTC_RailwayBookingSystem
 GO
 
+
+use MyRailway
+
+
+
 -- Users Table
 CREATE TABLE Users (
     UserID INT IDENTITY(1,1) PRIMARY KEY,
@@ -43,7 +48,7 @@ CREATE TABLE Trains (
     TrainName VARCHAR(100) NOT NULL,
     SourceStationID INT NOT NULL,
     DestinationStationID INT NOT NULL,
-    TrainType VARCHAR(20) CHECK (TrainType IN ('Express', 'Mail', 'Superfast', 'Shatabdi', 'Rajdhani')),
+    TrainType VARCHAR(20) CHECK (TrainType IN ('Express', 'Mail', 'Superfast', 'Shatabdi', 'Rajdhani','Passenger')),
     DepartureTime TIME,
     ArrivalTime TIME,
     RunningDays VARCHAR(100), -- e.g., 'Mon,Tue,Wed,Thu,Fri,Sat,Sun'
@@ -176,6 +181,73 @@ CREATE TABLE AlternateTrains (
     FOREIGN KEY (BookingID) REFERENCES Bookings(BookingID),
     FOREIGN KEY (AlternateTrainID) REFERENCES Trains(TrainID)
 );
+
+
+---====================================================================================================================================
+------------------------------------------------------------ Views -----------------------------------------------------------------
+---====================================================================================================================================
+
+CREATE VIEW UserProfileView AS
+SELECT 
+    UserID, 
+    Username, 
+    Email, 
+    FirstName, 
+    LastName, 
+    MobileNumber, 
+    Address, 
+    City, 
+    State, 
+    PinCode
+FROM Users;
+GO
+
+
+
+CREATE VIEW vw_BookingDetails AS
+SELECT 
+    b.PNRNumber,
+    b.JourneyDate,
+    b.BookingDate,
+    b.CoachType,
+    b.TotalPassengers,
+    b.TotalFare,
+    b.BookingStatus,
+    b.ConfirmationChance,
+    b.PaymentStatus,
+
+    t.TrainNumber,
+    t.TrainName,
+    t.RunningDays,
+
+    src.StationName AS SourceStation,
+    dest.StationName AS DestinationStation,
+
+    p.Name AS PassengerName,
+    p.Age AS PassengerAge,
+    p.Gender AS PassengerGender,
+    p.SeatNumber,
+
+    w.WaitingNumber,
+    w.ConfirmationChance AS WaitlistConfirmationChance
+
+FROM Bookings b
+JOIN Trains t ON b.TrainID = t.TrainID
+JOIN Stations src ON b.SourceStationID = src.StationID
+JOIN Stations dest ON b.DestinationStationID = dest.StationID
+LEFT JOIN Passengers p ON b.BookingID = p.BookingID
+LEFT JOIN WaitingList w ON b.BookingID = w.BookingID;
+
+
+
+SELECT COLUMN_NAME 
+FROM INFORMATION_SCHEMA.COLUMNS 
+WHERE TABLE_NAME = 'Bookings';
+
+
+---====================================================================================================================================
+------------------------------------------------------------ Views End ----------------------------------------------------------------
+---====================================================================================================================================
 
 -------------------------------------------------------------------------------------------------------------
 
@@ -377,3 +449,258 @@ select * from Bookings
 select * from Users
 
 select * from Passengers
+
+
+
+
+
+---====================================================================================================================================
+------------------------------------------------------------ Seat Manage --------------------------------------------------------------
+---====================================================================================================================================
+
+USE IRCTC_RailwayBookingSystem
+GO
+
+-- Create Seats Table
+CREATE TABLE Seats (
+    SeatID INT IDENTITY(1,1) PRIMARY KEY,
+    CoachID INT NOT NULL,
+    SeatNumber VARCHAR(10) NOT NULL,
+    SeatType VARCHAR(20) CHECK (SeatType IN ('Window', 'Middle', 'Aisle', 'Lower Berth', 'Middle Berth', 'Upper Berth', 'Side Lower', 'Side Upper')),
+    SeatStatus VARCHAR(20) CHECK (SeatStatus IN ('Available', 'Booked', 'Reserved', 'RAC', 'Maintenance')) DEFAULT 'Available',
+    CurrentBookingID INT NULL,
+    LastUpdated DATETIME DEFAULT GETDATE(),
+    FOREIGN KEY (CoachID) REFERENCES Coaches(CoachID),
+    FOREIGN KEY (CurrentBookingID) REFERENCES Bookings(BookingID),
+    UNIQUE (CoachID, SeatNumber)
+);
+GO
+
+-- Index for performance
+CREATE INDEX IX_Seats_CoachID ON Seats(CoachID);
+GO
+
+CREATE INDEX IX_Seats_Status ON Seats(SeatStatus);
+GO
+
+-- Create a view to see available seats by train
+CREATE VIEW vw_AvailableSeats AS
+SELECT 
+    t.TrainID,
+    t.TrainNumber,
+    t.TrainName,
+    c.CoachID,
+    c.CoachNumber,
+    c.CoachType,
+    s.SeatID,
+    s.SeatNumber,
+    s.SeatType,
+    s.SeatStatus
+FROM Trains t
+JOIN Coaches c ON t.TrainID = c.TrainID
+JOIN Seats s ON c.CoachID = s.CoachID
+WHERE s.SeatStatus = 'Available';
+GO
+
+-- Create a stored procedure to automatically populate seats for a coach
+CREATE OR ALTER PROCEDURE PopulateCoachSeats
+    @CoachID INT
+AS
+BEGIN
+    DECLARE @CoachType VARCHAR(20)
+    DECLARE @TotalSeats INT
+    DECLARE @Counter INT = 1
+    DECLARE @SeatNumber VARCHAR(10)
+    DECLARE @SeatType VARCHAR(20)
+    
+    -- Get coach information
+    SELECT @CoachType = CoachType, @TotalSeats = TotalSeats
+    FROM Coaches
+    WHERE CoachID = @CoachID
+    
+    -- Return if coach not found
+    IF @CoachType IS NULL
+        RETURN
+        
+    -- Delete existing seats for this coach
+    DELETE FROM Seats WHERE CoachID = @CoachID
+    
+    -- Insert seats based on coach type
+    WHILE @Counter <= @TotalSeats
+    BEGIN
+        SET @SeatNumber = CAST(@Counter AS VARCHAR(5))
+        
+        -- Set seat type based on coach type and seat number
+        SET @SeatType = CASE
+            WHEN @CoachType IN ('SL') THEN
+                CASE
+                    WHEN @Counter % 8 = 1 THEN 'Lower Berth'
+                    WHEN @Counter % 8 = 2 THEN 'Middle Berth'
+                    WHEN @Counter % 8 = 3 THEN 'Upper Berth'
+                    WHEN @Counter % 8 = 4 THEN 'Lower Berth'
+                    WHEN @Counter % 8 = 5 THEN 'Middle Berth'
+                    WHEN @Counter % 8 = 6 THEN 'Upper Berth'
+                    WHEN @Counter % 8 = 7 THEN 'Side Lower'
+                    ELSE 'Side Upper'
+                END
+            WHEN @CoachType IN ('2A') THEN
+                CASE
+                    WHEN @Counter % 6 = 1 THEN 'Lower Berth'
+                    WHEN @Counter % 6 = 2 THEN 'Upper Berth'
+                    WHEN @Counter % 6 = 3 THEN 'Lower Berth'
+                    WHEN @Counter % 6 = 4 THEN 'Upper Berth'
+                    WHEN @Counter % 6 = 5 THEN 'Side Lower'
+                    ELSE 'Side Upper'
+                END
+            WHEN @CoachType IN ('3A') THEN
+                CASE
+                    WHEN @Counter % 8 = 1 THEN 'Lower Berth'
+                    WHEN @Counter % 8 = 2 THEN 'Middle Berth'
+                    WHEN @Counter % 8 = 3 THEN 'Upper Berth'
+                    WHEN @Counter % 8 = 4 THEN 'Lower Berth'
+                    WHEN @Counter % 8 = 5 THEN 'Middle Berth'
+                    WHEN @Counter % 8 = 6 THEN 'Upper Berth'
+                    WHEN @Counter % 8 = 7 THEN 'Side Lower'
+                    ELSE 'Side Upper'
+                END
+            WHEN @CoachType IN ('1A') THEN
+                CASE
+                    WHEN @Counter % 4 = 1 THEN 'Lower Berth'
+                    WHEN @Counter % 4 = 2 THEN 'Upper Berth'
+                    WHEN @Counter % 4 = 3 THEN 'Lower Berth'
+                    ELSE 'Upper Berth'
+                END
+            WHEN @CoachType IN ('CC', 'FC', '2S') THEN
+                CASE
+                    WHEN @Counter % 3 = 1 THEN 'Window'
+                    WHEN @Counter % 3 = 2 THEN 'Middle'
+                    ELSE 'Aisle'
+                END
+            ELSE 'Regular'
+        END
+        
+        -- Insert the seat
+        INSERT INTO Seats (CoachID, SeatNumber, SeatType, SeatStatus)
+        VALUES (@CoachID, @SeatNumber, @SeatType, 'Available')
+        
+        SET @Counter = @Counter + 1
+    END
+    
+    -- Update available seats count in the Coaches table
+    UPDATE Coaches
+    SET AvailableSeats = @TotalSeats
+    WHERE CoachID = @CoachID
+END;
+GO
+
+-- Create a trigger to update the Coaches.AvailableSeats when seat status changes
+CREATE OR ALTER TRIGGER trg_UpdateCoachAvailableSeats
+ON Seats
+AFTER INSERT, UPDATE, DELETE
+AS
+BEGIN
+    -- Get affected CoachIDs
+    DECLARE @AffectedCoaches TABLE (CoachID INT)
+    
+    INSERT INTO @AffectedCoaches
+    SELECT DISTINCT CoachID FROM inserted
+    UNION
+    SELECT DISTINCT CoachID FROM deleted
+    
+    -- Update available seats count for each affected coach
+    UPDATE c
+    SET AvailableSeats = (
+        SELECT COUNT(*) 
+        FROM Seats s 
+        WHERE s.CoachID = c.CoachID AND s.SeatStatus = 'Available'
+    )
+    FROM Coaches c
+    WHERE c.CoachID IN (SELECT CoachID FROM @AffectedCoaches)
+END;
+GO
+
+-- Create a procedure to book specific seats
+CREATE OR ALTER PROCEDURE BookSeats
+    @BookingID INT,
+    @SeatIDs VARCHAR(MAX) -- Comma-separated list of SeatIDs
+AS
+BEGIN
+    BEGIN TRY
+        BEGIN TRANSACTION
+        
+        -- Create a table variable to hold the seat IDs
+        DECLARE @Seats TABLE (SeatID INT)
+        
+        -- Parse the comma-separated list
+        INSERT INTO @Seats
+        SELECT value FROM STRING_SPLIT(@SeatIDs, ',')
+        
+        -- Check if all seats are available
+        IF EXISTS (
+            SELECT 1 FROM Seats 
+            WHERE SeatID IN (SELECT SeatID FROM @Seats)
+            AND SeatStatus <> 'Available'
+        )
+        BEGIN
+            RAISERROR('One or more selected seats are not available.', 16, 1)
+            RETURN
+        END
+        
+        -- Book the seats
+        UPDATE s
+        SET s.SeatStatus = 'Booked',
+            s.CurrentBookingID = @BookingID,
+            s.LastUpdated = GETDATE()
+        FROM Seats s
+        WHERE s.SeatID IN (SELECT SeatID FROM @Seats)
+        
+        -- Update passenger seat numbers in the Passengers table
+        -- This assumes passengers are already added and need seats assigned
+        -- For simplicity, we'll just assign seats sequentially
+        
+        DECLARE @PassengerIDs TABLE (RowNum INT IDENTITY(1,1), PassengerID INT)
+        DECLARE @SeatNumbers TABLE (RowNum INT IDENTITY(1,1), SeatID INT, SeatNumber VARCHAR(20))
+        
+        INSERT INTO @PassengerIDs (PassengerID)
+        SELECT PassengerID
+        FROM Passengers
+        WHERE BookingID = @BookingID
+        AND SeatNumber IS NULL
+        
+        INSERT INTO @SeatNumbers (SeatID, SeatNumber)
+        SELECT s.SeatID, s.SeatNumber
+        FROM Seats s
+        WHERE s.SeatID IN (SELECT SeatID FROM @Seats)
+        ORDER BY s.SeatNumber
+        
+        -- Get coach numbers for all the seats
+        UPDATE p
+        SET SeatNumber = (
+            SELECT c.CoachNumber + '-' + s.SeatNumber
+            FROM Coaches c
+            JOIN Seats st ON c.CoachID = st.CoachID
+            JOIN @SeatNumbers s ON s.SeatID = st.SeatID
+            WHERE s.RowNum = pid.RowNum
+        )
+        FROM Passengers p
+        JOIN @PassengerIDs pid ON p.PassengerID = pid.PassengerID
+        WHERE pid.RowNum <= (SELECT COUNT(*) FROM @SeatNumbers)
+        
+        -- Update booking status to confirmed
+        UPDATE Bookings
+        SET BookingStatus = 'Confirmed',
+            ConfirmationChance = 100
+        WHERE BookingID = @BookingID
+        
+        COMMIT TRANSACTION
+    END TRY
+    BEGIN CATCH
+        ROLLBACK TRANSACTION
+        DECLARE @ErrorMessage NVARCHAR(4000) = ERROR_MESSAGE()
+        RAISERROR(@ErrorMessage, 16, 1)
+    END CATCH
+END;
+GO
+
+-- Example: Populate seats for a coach
+-- EXEC PopulateCoachSeats @CoachID = 1;

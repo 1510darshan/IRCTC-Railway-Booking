@@ -1,10 +1,10 @@
-const {sql, poolPromise } = require('../config/db');
+const { sql, poolPromise } = require('../config/db');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 
 exports.register = async (req, res) => {
     const { username, email, password, firstName, lastName, mobileNumber, address, city, state, pinCode } = req.body;
-    console.log( username, email, password, firstName, lastName, mobileNumber, address, city, state, pinCode)
+    console.log(username, email, password, firstName, lastName, mobileNumber, address, city, state, pinCode)
     try {
         const pool = await poolPromise;
         const passwordHash = await bcrypt.hash(password, 10);
@@ -34,55 +34,55 @@ exports.register = async (req, res) => {
 
 
 exports.login = async (req, res) => {
-  const { username, password } = req.body;
-  console.log( username, password);
+    const { username, password } = req.body;
+    console.log(username, password);
 
-  try {
-      const pool = await poolPromise;
-      const result = await pool.request()
-          .input('Username', sql.VarChar, username)
-          .query('SELECT * FROM Users WHERE Username = @Username');
+    try {
+        const pool = await poolPromise;
+        const result = await pool.request()
+            .input('Username', sql.VarChar, username)
+            .query('SELECT * FROM Users WHERE Username = @Username');
 
-      const user = result.recordset[0];
-      if (!user) {
-          return res.status(400).json({ error: 'Invalid credentials' });
-      }
+        const user = result.recordset[0];
+        if (!user) {
+            return res.status(400).json({ error: 'Invalid credentials' });
+        }
 
-      const isMatch = await bcrypt.compare(password, user.PasswordHash);
-      if (!isMatch) {  // Fix: Check isMatch instead of user
-          return res.status(400).json({ error: 'Invalid credentials' });
-      }
+        const isMatch = await bcrypt.compare(password, user.PasswordHash);
+        if (!isMatch) {  // Fix: Check isMatch instead of user
+            return res.status(400).json({ error: 'Invalid credentials' });
+        }
 
-      // Ensure JWT_SECRET is defined
-      // if (!process.env.JWT_SECRET) {
-      //     return res.status(500).json({ error: 'JWT_SECRET is not configured' });
-      // }
+        // Ensure JWT_SECRET is defined
+        // if (!process.env.JWT_SECRET) {
+        //     return res.status(500).json({ error: 'JWT_SECRET is not configured' });
+        // }
 
-      const token = jwt.sign(
-          { userId: user.UserID, role: user.Role },
-          "mysecretkey123456",  // Use environment variable
-          { expiresIn: '1h' }
-      );
+        const token = jwt.sign(
+            { userId: user.UserID, role: user.Role },
+            "mysecretkey123456",  // Use environment variable
+            { expiresIn: '1h' }
+        );
 
-      res.cookie("token", token, {
-          httpOnly: true,
-          secure: process.env.NODE_ENV === "production",  // Secure in production
-          sameSite: "strict",
-          maxAge: 3*60 * 60 * 1000  // Match token expiry (1 hour)
-      }).status(200).json({
-          message: 'Login successful',
-          token: token,  // Include token in response body for Postman
-          user: {
-              userId: user.UserID,
-              username: user.Username,
-              role: user.Role
-          }
-      });
+        res.cookie("authToken", token, {
+            httpOnly: true,
+            secure: process.env.NODE_ENV === "production",  // Secure in production
+            sameSite: "strict",
+            maxAge: 3 * 60 * 60 * 1000  // Match token expiry (1 hour)
+        }).status(200).json({
+            message: 'Login successful',
+            token: token,  // Include token in response body for Postman
+            user: {
+                userId: user.UserID,
+                username: user.Username,
+                role: user.Role
+            }
+        });
 
-  } catch (err) {
-      console.error(err);
-      res.status(500).json({ error: 'Server error' });
-  }
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'Server error' });
+    }
 };
 
 
@@ -92,8 +92,8 @@ exports.getProfile = async (req, res) => {
         const result = await pool.request()
             .input('UserID', sql.Int, req.user.userId)
             .query(`
-                SELECT UserID, Username, Email, FirstName, LastName, MobileNumber, Address, City, State, PinCode
-                FROM Users
+                SELECT * 
+                FROM UserProfileView 
                 WHERE UserID = @UserID
             `);
 

@@ -1,7 +1,9 @@
-const { poolPromise } = require('../config/db');
+const { sql, poolPromise } = require('../config/db');
 
 exports.processPayment = async (req, res) => {
     const { bookingId, amount, paymentMethod, transactionId } = req.body;
+
+    console.log( bookingId, amount, paymentMethod, transactionId);
     try {
         const pool = await poolPromise;
         await pool.request()

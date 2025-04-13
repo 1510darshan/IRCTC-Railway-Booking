@@ -1,4 +1,4 @@
-const { sql,poolPromise } = require('../config/db');
+const { sql, poolPromise } = require('../config/db');
 
 
 exports.createBooking = async (req, res) => {
@@ -13,24 +13,30 @@ exports.createBooking = async (req, res) => {
         totalFare,
         passengers
     } = req.body;
+    console.log(userId,
+        trainId,
+        sourceStationId,
+        destinationStationId,
+        journeyDate,
+        coachType,
+        totalPassengers,
+        totalFare,
+        passengers)
 
     try {
         const pool = await poolPromise;
         const request = pool.request();
 
-        console.log('Executing CreateBookingWithPNR with:', {
-            UserID: userId,
-            TrainID: trainId,
-            SourceStationID: sourceStationId,
-            DestinationStationID: destinationStationId,
-            JourneyDate: journeyDate,
-            CoachType: coachType,
-            TotalPassengers: totalPassengers,
-            TotalFare: totalFare,
-            BookingStatus: 'Waiting',
-            ConfirmationChance: 0,
-            PaymentStatus: 'Pending'
-        });
+        if (!userId | !trainId | !sourceStationId | !destinationStationId
+            | !journeyDate
+            | !coachType
+            | !totalPassengers
+            | !totalFare
+            | !passengers) {
+            console.log("Enter all fields");
+        }
+
+        
 
         const result = await request
             .input('UserID', sql.Int, userId)
@@ -88,6 +94,7 @@ exports.createBooking = async (req, res) => {
         res.status(201).json({
             message: 'Booking created successfully',
             pnrNumber: generatedPNR,
+            bookingId : bookingId,
             confirmationChance: await getConfirmationChance(bookingId),
             alternateTrains: alternateTrainsResult.recordset
         });
@@ -101,33 +108,29 @@ exports.createBooking = async (req, res) => {
 
 exports.getBookingByPNR = async (req, res) => {
     const { pnrNumber } = req.params;
-    console.log(pnrNumber)
-    
+
     try {
         const pool = await poolPromise;
         const result = await pool.request()
             .input('PNRNumber', sql.VarChar, pnrNumber)
             .query(`
-                SELECT b.PNRNumber, b.JourneyDate, b.BookingDate, b.CoachType, b.TotalPassengers, b.TotalFare,
-                       b.BookingStatus, b.ConfirmationChance, b.PaymentStatus,
-                       t.TrainNumber, t.TrainName, t.RunningDays,
-                       src.StationName AS SourceStation, dest.StationName AS DestinationStation,
-                       p.Name, p.Age, p.Gender, p.SeatNumber,
-                       w.WaitingNumber, w.ConfirmationChance AS WaitlistConfirmationChance
-                FROM Bookings b
-                JOIN Trains t ON b.TrainID = t.TrainID
-                JOIN Stations src ON b.SourceStationID = src.StationID
-                JOIN Stations dest ON b.DestinationStationID = dest.StationID
-                LEFT JOIN Passengers p ON b.BookingID = p.BookingID
-                LEFT JOIN WaitingList w ON b.BookingID = w.BookingID
-                WHERE b.PNRNumber = @PNRNumber
+                SELECT *
+                FROM vw_BookingDetails
+                WHERE PNRNumber = @PNRNumber
             `);
-        if (result.recordset.length === 0) return res.status(404).json({ error: 'PNR not found' });
+
+        if (result.recordset.length === 0) {
+            return res.status(404).json({ error: 'PNR not found' });
+        }
+
         res.json(result.recordset);
     } catch (err) {
+        console.error("Error querying PNR:", err);
         res.status(500).json({ error: err.message });
     }
 };
+
+
 
 exports.cancelBooking = async (req, res) => {
     const { pnrNumber } = req.params;
@@ -148,10 +151,107 @@ exports.cancelBooking = async (req, res) => {
     }
 };
 
+
+
+exports.getUserBookings = async (req, res) => {
+    const userId = req.params.userId;
+    console.log("UserID : ", userId);
+    
+    try {
+        // Verify that the requesting user is accessing their own bookings
+        // if (!req.user || req.user.id !== parseInt(userId)) {
+        //     return res.status(403).json({ error: 'Unauthorized access to bookings' });
+        // }
+        
+        
+        const pool = await poolPromise;
+        const result = await pool.request()
+            .input('UserID', sql.Int, userId)
+            .query(`
+                SELECT 
+                    b.BookingID,
+                    b.PNRNumber,
+                    b.UserID,
+                    b.TrainID,
+                    t.TrainName,
+                    b.JourneyDate,
+                    b.BookingDate,
+                    b.BookingStatus,
+                    b.PaymentStatus,
+                    b.TotalFare,
+                    b.CoachType,
+                    b.TotalPassengers,
+                    s1.StationName AS SourceStation,
+                    s2.StationName AS DestinationStation,
+                    b.ConfirmationChance
+                FROM 
+                    Bookings b
+                LEFT JOIN 
+                    Trains t ON b.TrainID = t.TrainID
+                LEFT JOIN 
+                    Stations s1 ON b.SourceStationID = s1.StationID
+                LEFT JOIN 
+                    Stations s2 ON b.DestinationStationID = s2.StationID
+                WHERE 
+                    b.UserID = @UserID
+                ORDER BY 
+                    b.JourneyDate DESC, b.BookingDate DESC
+            `);
+        console.log("My Data :",result.recordset);
+        res.json(result.recordset);
+    } catch (err) {
+        console.error('Error fetching user bookings:', err);
+        res.status(500).json({ error: 'Server error while fetching bookings' });
+    }
+};
+
 async function getConfirmationChance(bookingId) {
     const pool = await poolPromise;
     const result = await pool.request()
         .input('BookingID', sql.Int, bookingId)
         .query('SELECT ConfirmationChance FROM Bookings WHERE BookingID = @BookingID');
     return result.recordset[0]?.ConfirmationChance || 0;
+
+}
+
+
+
+// Helper function to update waiting list after a cancellation
+async function updateWaitingListBookings(pool, trainId, journeyDate) {
+    try {
+        // Get all waiting list bookings for this train and date
+        const waitingListResult = await pool.request()
+            .input('TrainID', sql.Int, trainId)
+            .input('JourneyDate', sql.Date, journeyDate)
+            .query(`
+                SELECT BookingID
+                FROM Bookings
+                WHERE TrainID = @TrainID 
+                AND JourneyDate = @JourneyDate
+                AND BookingStatus IN ('Waiting', 'RAC')
+                ORDER BY BookingDate ASC
+            `);
+        
+        // Update confirmation chances for each booking
+        const waitingListBookings = waitingListResult.recordset;
+        for (let i = 0; i < waitingListBookings.length; i++) {
+            const bookingId = waitingListBookings[i].BookingID;
+            
+            // Calculate new confirmation chance (higher for those who booked earlier)
+            const newChance = Math.min(100, 50 + Math.floor((waitingListBookings.length - i) * 5));
+            
+            await pool.request()
+                .input('BookingID', sql.Int, bookingId)
+                .input('ConfirmationChance', sql.Int, newChance)
+                .query(`
+                    UPDATE Bookings
+                    SET ConfirmationChance = @ConfirmationChance
+                    WHERE BookingID = @BookingID
+                `);
+        }
+    } catch (err) {
+        console.error('Error updating waiting list bookings:', err);
+        // We don't want to fail the entire transaction if this fails
+        // Just log the error
+    }
 }

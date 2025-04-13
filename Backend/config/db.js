@@ -13,7 +13,7 @@ const dbConfig = {
     user: process.env.DB_USER || "Darshan",
     password: process.env.DB_PASSWORD || '12345',
     server: process.env.DB_SERVER || 'LAPTOP-9CPN5090\\SQLEXPRESS',  // Should now be LAPTOP-9CPN5090\SQLEXPRESS
-    database: process.env.DB_NAME || 'IRCTC_RailwayBookingSystem',
+    database: process.env.DB_NAME || 'MyRailway',
     port: parseInt(process.env.DB_PORT) || 1433,  // Add port
     options: {
         encrypt: true,  // Required for Azure or if encryption is enabled
