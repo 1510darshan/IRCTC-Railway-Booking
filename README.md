@@ -61,12 +61,12 @@ JWT_SECRET=your_jwt_secret
 5. Set up the database:
 - Execute the SQL scripts in the Database folder:
   - `Railway.sql` (Main schema)
-  - `database.sql` (Initial data)
 
 ## Running the Application
 
 1. Start the backend server:
 ```bash
+cd backend
 npm start
 ```
 
