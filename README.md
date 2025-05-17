@@ -35,7 +35,7 @@ A full-stack web application for railway ticket booking, built with React, Node.
 
 1. Clone the repository:
 ```bash
-git clone [repository-url]
+git clone https://github.com/1510darshan/IRCTC-Railway-Booking.git
 ```
 
 2. Install backend dependencies:
